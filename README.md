@@ -1,4 +1,4 @@
-# mcp-server-qdrant: A Qdrant MCP server
+# mcp-server-qdrant: Custom OpenAI-Compatible Embedding Server for Qdrant MCP
 
 [![smithery badge](https://smithery.ai/badge/mcp-server-qdrant)](https://smithery.ai/protocol/mcp-server-qdrant)
 
@@ -7,7 +7,23 @@
 > AI-powered IDE, enhancing a chat interface, or creating custom AI workflows, MCP provides a standardized way to
 > connect LLMs with the context they need.
 
-This repository is an example of how to create a MCP server for [Qdrant](https://qdrant.tech/), a vector search engine.
+This repository is a fork of [`qdrant/mcp-server-qdrant`](https://github.com/qdrant/mcp-server-qdrant) and an example of how to create a MCP server for [Qdrant](https://qdrant.tech/), a vector search engine.
+
+## Why this fork exists
+
+This fork keeps the official Qdrant MCP server behavior, but adds support for using an external OpenAI-compatible embeddings API instead of local FastEmbed-only inference.
+
+The main reason for the change is to support higher-quality or centrally managed embedding models exposed through any OpenAI-compatible embeddings endpoint, including self-hosted gateways and managed providers.
+
+That allows you to:
+
+- keep Qdrant as the memory/search layer,
+- keep the official MCP server structure and tool behavior,
+- choose your own embedding model through environment variables,
+- avoid local fallback embeddings when you want a single shared embedding pipeline,
+- let the server detect the real embedding dimension before creating a collection.
+
+If you do not need that, the default FastEmbed flow still works.
 
 ## Overview
 
@@ -44,8 +60,12 @@ The configuration of the server is done using environment variables:
 | `QDRANT_API_KEY`         | API key for the Qdrant server                                       | None                                                              |
 | `COLLECTION_NAME`        | Name of the default collection to use.                              | None                                                              |
 | `QDRANT_LOCAL_PATH`      | Path to the local Qdrant database (alternative to `QDRANT_URL`)     | None                                                              |
-| `EMBEDDING_PROVIDER`     | Embedding provider to use (currently only "fastembed" is supported) | `fastembed`                                                       |
+| `EMBEDDING_PROVIDER`     | Embedding provider to use (`fastembed` or `openai`)                  | `fastembed`                                                       |
 | `EMBEDDING_MODEL`        | Name of the embedding model to use                                  | `sentence-transformers/all-MiniLM-L6-v2`                          |
+| `EMBEDDING_BASE_URL`     | Base URL for OpenAI-compatible embeddings API                        | None                                                              |
+| `EMBEDDING_API_KEY`      | API key for OpenAI-compatible embeddings API                         | None                                                              |
+| `EMBEDDING_EXPECTED_RESPONSE_MODEL` | Expected `model` value in embedding responses               | `EMBEDDING_MODEL`                                                 |
+| `EMBEDDING_VECTOR_NAME`  | Override vector name stored in Qdrant                                | sanitized model name                                              |
 | `TOOL_STORE_DESCRIPTION` | Custom description for the store tool                               | See default in [`settings.py`](src/mcp_server_qdrant/settings.py) |
 | `TOOL_FIND_DESCRIPTION`  | Custom description for the find tool                                | See default in [`settings.py`](src/mcp_server_qdrant/settings.py) |
 
@@ -53,6 +73,33 @@ Note: You cannot provide both `QDRANT_URL` and `QDRANT_LOCAL_PATH` at the same t
 
 > [!IMPORTANT]
 > Command-line arguments are not supported anymore! Please use environment variables for all configuration.
+
+## Embedding backends
+
+This fork supports two embedding modes:
+
+### 1. `fastembed`
+
+This is the original upstream behavior.
+
+- embeddings are generated locally,
+- FastEmbed models are used,
+- the default model is `sentence-transformers/all-MiniLM-L6-v2`.
+
+### 2. `openai`
+
+This fork-specific mode uses any OpenAI-compatible embeddings endpoint.
+
+In this mode the server:
+
+- sends every embedding request to `EMBEDDING_BASE_URL + /v1/embeddings`,
+- forces `model=EMBEDDING_MODEL`,
+- requests `encoding_format=float`,
+- validates the embedding response structure,
+- optionally checks the returned response model through `EMBEDDING_EXPECTED_RESPONSE_MODEL`,
+- detects the real vector size from the returned embedding before creating a collection.
+
+This is the recommended mode if you want to use your own centralized embedding model.
 
 ### FastMCP Environment Variables
 
@@ -178,8 +225,23 @@ For local Qdrant mode:
 
 This MCP server will automatically create a collection with the specified name if it doesn't exist.
 
-By default, the server will use the `sentence-transformers/all-MiniLM-L6-v2` embedding model to encode memories.
-For the time being, only [FastEmbed](https://qdrant.github.io/fastembed/) models are supported.
+By default, the server will use the `sentence-transformers/all-MiniLM-L6-v2` embedding model via FastEmbed.
+
+If you want to use an OpenAI-compatible embeddings backend, set:
+
+```shell
+EMBEDDING_PROVIDER="openai" \
+EMBEDDING_BASE_URL="https://your-openai-compatible-endpoint" \
+EMBEDDING_MODEL="your-embedding-model" \
+EMBEDDING_API_KEY="your-api-key" \
+uvx mcp-server-qdrant --transport streamable-http
+```
+
+In `openai` mode, the server:
+- forces `model=EMBEDDING_MODEL` on every `/v1/embeddings` request,
+- requests `encoding_format=float`,
+- validates the response structure,
+- probes the real embedding dimension before creating a collection.
 
 ## Support for other tools
 
@@ -257,6 +319,19 @@ existing codebase.
     -e EMBEDDING_MODEL="sentence-transformers/all-MiniLM-L6-v2" \
     -e TOOL_STORE_DESCRIPTION="Store code snippets with descriptions. The 'information' parameter should contain a natural language description of what the code does, while the actual code should be included in the 'metadata' parameter as a 'code' property." \
     -e TOOL_FIND_DESCRIPTION="Search for relevant code snippets using natural language. The 'query' parameter should describe the functionality you're looking for." \
+    -- uvx mcp-server-qdrant
+    ```
+
+For a custom OpenAI-compatible embeddings backend:
+
+    ```shell
+    claude mcp add code-search \
+    -e QDRANT_URL="http://localhost:6333" \
+    -e COLLECTION_NAME="code-repository" \
+    -e EMBEDDING_PROVIDER="openai" \
+    -e EMBEDDING_BASE_URL="https://your-openai-compatible-endpoint" \
+    -e EMBEDDING_MODEL="your-embedding-model" \
+    -e EMBEDDING_API_KEY="your-api-key" \
     -- uvx mcp-server-qdrant
     ```
 

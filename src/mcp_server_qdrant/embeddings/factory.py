@@ -13,5 +13,17 @@ def create_embedding_provider(settings: EmbeddingProviderSettings) -> EmbeddingP
         from mcp_server_qdrant.embeddings.fastembed import FastEmbedProvider
 
         return FastEmbedProvider(settings.model_name)
+    if settings.provider_type == EmbeddingProviderType.OPENAI:
+        from mcp_server_qdrant.embeddings.openai_compatible import (
+            OpenAICompatibleProvider,
+        )
+
+        return OpenAICompatibleProvider(
+            base_url=settings.base_url,
+            model_name=settings.model_name,
+            api_key=settings.api_key,
+            expected_response_model=settings.expected_response_model,
+            vector_name=settings.vector_name,
+        )
     else:
         raise ValueError(f"Unsupported embedding provider: {settings.provider_type}")

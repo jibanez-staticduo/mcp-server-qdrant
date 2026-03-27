@@ -15,11 +15,11 @@ class EmbeddingProvider(ABC):
         pass
 
     @abstractmethod
-    def get_vector_name(self) -> str:
+    def get_vector_name(self) -> str | None:
         """Get the name of the vector for the Qdrant collection."""
         pass
 
     @abstractmethod
-    def get_vector_size(self) -> int:
+    async def get_vector_size(self) -> int:
         """Get the size of the vector for the Qdrant collection."""
         pass

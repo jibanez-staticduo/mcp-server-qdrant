@@ -78,6 +78,11 @@ class TestEmbeddingProviderSettings:
         assert settings.provider_type == EmbeddingProviderType.FASTEMBED
         assert settings.model_name == "custom_model"
 
+    def test_openai_requires_base_url(self, monkeypatch):
+        monkeypatch.setenv("EMBEDDING_PROVIDER", "openai")
+        with pytest.raises(ValueError):
+            EmbeddingProviderSettings()
+
 
 class TestToolSettings:
     def test_default_values(self):
