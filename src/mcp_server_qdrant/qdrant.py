@@ -79,12 +79,17 @@ class QdrantConnector:
         # Add to Qdrant
         vector_name = self._embedding_provider.get_vector_name()
         payload = {"document": entry.content, METADATA_PATH: entry.metadata}
+        vector_payload: list[float] | dict[str, list[float]]
+        if vector_name:
+            vector_payload = {vector_name: embeddings[0]}
+        else:
+            vector_payload = embeddings[0]
         await self._client.upsert(
             collection_name=collection_name,
             points=[
                 models.PointStruct(
                     id=uuid.uuid4().hex,
-                    vector={vector_name: embeddings[0]},
+                    vector=vector_payload,
                     payload=payload,
                 )
             ],
@@ -121,18 +126,22 @@ class QdrantConnector:
         vector_name = self._embedding_provider.get_vector_name()
 
         # Search in Qdrant
-        search_results = await self._client.query_points(
-            collection_name=collection_name,
-            query=query_vector,
-            using=vector_name,
-            limit=limit,
-            query_filter=query_filter,
-        )
+        query_kwargs = {
+            "collection_name": collection_name,
+            "query": query_vector,
+            "limit": limit,
+            "query_filter": query_filter,
+        }
+        if vector_name:
+            query_kwargs["using"] = vector_name
+        search_results = await self._client.query_points(**query_kwargs)
 
         return [
             Entry(
-                content=result.payload["document"],
-                metadata=result.payload.get("metadata"),
+                content=result.payload.get("document") or result.payload.get("text"),
+                metadata=result.payload.get("metadata")
+                or result.payload.get(METADATA_PATH)
+                or None,
             )
             for result in search_results.points
         ]
@@ -145,18 +154,26 @@ class QdrantConnector:
         collection_exists = await self._client.collection_exists(collection_name)
         if not collection_exists:
             # Create the collection with the appropriate vector size
-            vector_size = self._embedding_provider.get_vector_size()
+            vector_size = await self._embedding_provider.get_vector_size()
 
             # Use the vector name as defined in the embedding provider
             vector_name = self._embedding_provider.get_vector_name()
-            await self._client.create_collection(
-                collection_name=collection_name,
-                vectors_config={
+            vectors_config: models.VectorParams | dict[str, models.VectorParams]
+            if vector_name:
+                vectors_config = {
                     vector_name: models.VectorParams(
                         size=vector_size,
                         distance=models.Distance.COSINE,
                     )
-                },
+                }
+            else:
+                vectors_config = models.VectorParams(
+                    size=vector_size,
+                    distance=models.Distance.COSINE,
+                )
+            await self._client.create_collection(
+                collection_name=collection_name,
+                vectors_config=vectors_config,
             )
 
             # Create payload indexes if configured
